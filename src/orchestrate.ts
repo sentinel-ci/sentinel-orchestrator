@@ -20,7 +20,7 @@ async function resolvePrNumber(): Promise<number> {
 
 /**
  * Entry point run on the GitHub Actions runner (has network — needed for the
- * repair agent's Claude calls and for posting back to the GitHub API). Wraps
+ * repair agent's Gemini calls and for posting back to the GitHub API). Wraps
  * the retry loop and turns its outcome into PR-visible actions.
  */
 async function main(): Promise<void> {

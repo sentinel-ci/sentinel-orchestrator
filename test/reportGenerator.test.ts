@@ -56,7 +56,7 @@ describe("renderMarkdownReport", () => {
             iteration: 0,
             timestamp: new Date().toISOString(),
             prompt: "fix it",
-            model: "claude-sonnet-5",
+            model: "gemini-2.5-flash-lite",
             filesChanged: ["src/a.js"],
             diff: "--- a/src/a.js\n+++ b/src/a.js\n-old\n+new",
             rawResponse: "{}",

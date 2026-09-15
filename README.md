@@ -3,7 +3,7 @@
 The validation + repair engine for [Sentinel CI](https://github.com/sentinel-ci). Takes a
 target app, runs it through a sandboxed test → lint → mutation-testing pass, turns the
 result into a single 0-100 trust score, and — if the score misses the threshold — asks
-Claude to repair the code and tries again, up to a bounded number of iterations.
+Gemini to repair the code and tries again, up to a bounded number of iterations.
 
 This repo is the reusable engine. It doesn't contain a target app itself; it validates
 whatever app is checked out alongside it in CI (see `sentinel-ci/sandbox-test` for the
@@ -17,7 +17,7 @@ current demo app and the workflow that wires the two together).
  (sandbox-test's         │  - resolves PR number                    │
   sentinel.yml)          │  - runs the retry loop                   │
                          │  - posts PR comment / opens promotion PR  │
-                         │  - calls Claude (repairAgent.ts)          │
+                         │  - calls Gemini (repairAgent.ts)          │
                          └───────────────┬───────────────────────────┘
                                           │ docker build && docker run
                                           │   --network=none --memory=512m --cpus=1
@@ -47,7 +47,7 @@ next build.
 | `src/aggregator.ts` | Combines the three signals into a weighted 0-100 trust score |
 | `src/reportGenerator.ts` | Renders the markdown (PR comment) and JSON (artifact) reports |
 | `src/decisionGate.ts` | Pure `trustScore/threshold/iteration -> pass \| repair \| block` |
-| `src/repairAgent.ts` | Sends the failure report to Claude, applies the returned patch |
+| `src/repairAgent.ts` | Sends the failure report to Gemini, applies the returned patch |
 | `src/retryLoop.ts` | Bounded validate → repair → re-validate loop |
 | `src/sandbox.ts` | `docker build`/`docker run` wrapper (BuildKit named contexts) |
 | `src/githubClient.ts` | PR comments, labels, opening the staging→production promotion PR |
@@ -59,12 +59,12 @@ next build.
 
 The sandbox is `--network=none` by design — the whole point is to execute
 possibly-untrusted PR code without giving it network access. But the repair step needs
-outbound HTTPS to call the Claude API, which is a genuine contradiction with a literal
+outbound HTTPS to call the Gemini API, which is a genuine contradiction with a literal
 reading of "network=none, no new container spin-up mid-loop."
 
 Resolution: **only code execution happens inside the isolated container.** The repair
 agent runs on the GitHub Actions runner, reads the validation report (data, not code
-execution), calls Claude, and writes the patch directly to the checked-out working
+execution), calls Gemini, and writes the patch directly to the checked-out working
 copy on the host. The container is rebuilt for the next iteration from that updated
 working copy. This keeps the actual untrusted-code-execution boundary intact
 (nothing the PR's code does ever runs with network access) while still letting the
@@ -142,13 +142,13 @@ All of the above are env vars, read in `src/config.ts`:
 | `SENTINEL_PROMOTION_THRESHOLD` | `75` |
 | `SENTINEL_MAX_ITERATIONS` | `3` |
 | `SENTINEL_ALLOW_TEST_EDITS` | `false` |
-| `SENTINEL_REPAIR_MODEL` | `claude-sonnet-5` |
+| `SENTINEL_REPAIR_MODEL` | `gemini-2.5-flash-lite` |
 | `SENTINEL_TEST_DIRS` | `tests,test,__tests__` |
 | `SENTINEL_PR_NUMBER` | (read from `GITHUB_EVENT_PATH` if unset) |
 | `SENTINEL_CHECKOUT_DIR` | `process.cwd()` — the target app's checked-out path |
 | `SENTINEL_ORCHESTRATOR_DIR` | `process.cwd()` — this repo's checked-out path |
 | `SENTINEL_PRODUCTION_BRANCH` / `SENTINEL_STAGING_BRANCH` | `production` / `staging` |
-| `ANTHROPIC_API_KEY` | required for the repair step to run |
+| `GEMINI_API_KEY` | required for the repair step to run |
 | `GITHUB_TOKEN` | required to post PR comments / open the promotion PR |
 
 ## Local development

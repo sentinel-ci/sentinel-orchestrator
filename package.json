@@ -16,7 +16,6 @@
     "orchestrate": "node dist/orchestrate.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.0",
     "diff": "^7.0.0"
   },
   "devDependencies": {

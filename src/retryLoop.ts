@@ -25,7 +25,7 @@ export interface RetryLoopOptions {
  * cheap since only the final COPY layers invalidate) rather than kept alive
  * across iterations — see README "same sandbox instance" for why a literal
  * long-lived container is incompatible with --network=none once the repair
- * step needs outbound access to call Claude.
+ * step needs outbound access to call Gemini.
  */
 export async function runRetryLoop(options: RetryLoopOptions): Promise<RunHistory> {
   const { prNumber, targetDir, dockerfile, orchestratorDir, config } = options;

@@ -3,7 +3,7 @@
 # for what changed and why.
 #
 # Requires two repo secrets on sandbox-test before this will work:
-#   - ANTHROPIC_API_KEY          for the repair agent
+#   - GEMINI_API_KEY             for the repair agent
 #   - SENTINEL_ORCHESTRATOR_PAT  a token with read access to
 #     sentinel-ci/sentinel-orchestrator (it's currently a PRIVATE repo, so the
 #     default GITHUB_TOKEN scoped to sandbox-test can't check it out). Either
@@ -54,7 +54,7 @@ jobs:
           SENTINEL_CHECKOUT_DIR: ${{ github.workspace }}/target-app
           SENTINEL_ORCHESTRATOR_DIR: ${{ github.workspace }}/sentinel-orchestrator
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: node dist/orchestrate.js
 
       - name: Upload run history

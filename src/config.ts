@@ -35,7 +35,7 @@ export interface SentinelConfig {
   maxIterations: number;
   /** Whether the repair agent may edit files under the configured test dirs. */
   allowTestEdits: boolean;
-  /** Anthropic model used for repair. */
+  /** Gemini model used for repair. */
   repairModel: string;
   /** Directory (relative to the target app root) treated as test code. */
   testDirs: string[];
@@ -67,7 +67,7 @@ export function loadConfig(): SentinelConfig {
     promotionThreshold: envFloat("SENTINEL_PROMOTION_THRESHOLD", 75),
     maxIterations: envInt("SENTINEL_MAX_ITERATIONS", 3),
     allowTestEdits: (process.env.SENTINEL_ALLOW_TEST_EDITS ?? "false") === "true",
-    repairModel: process.env.SENTINEL_REPAIR_MODEL ?? "claude-sonnet-5",
+    repairModel: process.env.SENTINEL_REPAIR_MODEL ?? "gemini-2.5-flash-lite",
     testDirs: (process.env.SENTINEL_TEST_DIRS ?? "tests,test,__tests__")
       .split(",")
       .map((s) => s.trim())

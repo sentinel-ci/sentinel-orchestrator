@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { createTwoFilesPatch } from "diff";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -78,8 +77,40 @@ function extractJson(raw: string): RepairResponse {
   return JSON.parse(jsonText) as RepairResponse;
 }
 
+interface GeminiResponse {
+  candidates?: { content?: { parts?: { text?: string }[] } }[];
+  error?: { message?: string };
+}
+
+/** Calls the Gemini REST API directly (no SDK dependency) and returns the raw text response. */
+async function callGemini(model: string, apiKey: string, prompt: string): Promise<string> {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: "application/json" },
+      }),
+    },
+  );
+
+  const body = (await response.json()) as GeminiResponse;
+
+  if (!response.ok) {
+    throw new Error(`Gemini API returned ${response.status}: ${body.error?.message ?? JSON.stringify(body)}`);
+  }
+
+  const text = body.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error(`Gemini API returned no text content: ${JSON.stringify(body)}`);
+  }
+  return text;
+}
+
 /**
- * Sends the failure report + relevant source to Claude and applies the
+ * Sends the failure report + relevant source to Gemini and applies the
  * returned patch inside the sandbox's working copy. Runs on the host (needs
  * network for the API call) — see README for why this step is intentionally
  * outside the network-isolated container.
@@ -113,7 +144,8 @@ export async function runRepair(
 
   const prompt = buildPrompt(validation, fileContents);
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
     return {
       iteration,
       timestamp,
@@ -123,23 +155,13 @@ export async function runRepair(
       diff: "",
       rawResponse: "",
       applied: false,
-      error: "ANTHROPIC_API_KEY is not set; repair agent cannot call the LLM.",
+      error: "GEMINI_API_KEY is not set; repair agent cannot call the LLM.",
     };
   }
 
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
   let rawResponse = "";
   try {
-    const message = await client.messages.create({
-      model: config.repairModel,
-      max_tokens: 8000,
-      messages: [{ role: "user", content: prompt }],
-    });
-    rawResponse = message.content
-      .filter((block): block is Anthropic.TextBlock => block.type === "text")
-      .map((block) => block.text)
-      .join("\n");
+    rawResponse = await callGemini(config.repairModel, apiKey, prompt);
   } catch (err) {
     return {
       iteration,
@@ -150,7 +172,7 @@ export async function runRepair(
       diff: "",
       rawResponse: "",
       applied: false,
-      error: `Anthropic API call failed: ${(err as Error).message}`,
+      error: `Gemini API call failed: ${(err as Error).message}`,
     };
   }
 
