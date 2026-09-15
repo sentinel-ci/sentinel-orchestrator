@@ -171,6 +171,21 @@ solves cleanly. Documented here rather than silently deviating from the plan.
 - **Alice's test-gen scope and mutation-testing's scope are the same list** (the PR's changed
   production files) rather than two independently-tuned scopes, for consistency: whatever
   the PR touched is both what gets a fresh test and what gets mutated.
+- **Alice must assert intended behavior, not observed behavior — the prompt now says this
+  explicitly, after a real demo run caught her doing the wrong thing.** Given a genuinely
+  broken `login()` (comparison operator flipped — correct passwords rejected, wrong ones
+  accepted), her first version *noticed* the bug in her own reasoning (a code comment read
+  "a matching hash actually triggers the 401 response (an intentional or buggy quirk)"), then
+  wrote the test to assert the buggy behavior anyway, with a comment like "following current
+  implementation logic." The suite passed, the bug shipped, and nothing downstream ever saw a
+  problem — a test suite generated *from* the code, without any notion of what the code is
+  supposed to do, will happily encode its bugs as spec. This is arguably the most important
+  failure mode of test-generation-from-source-alone, since it silently defeats the entire
+  point for exactly the bugs that matter. Fixed by telling Alice explicitly to infer intent
+  from names/comments/conventions and assert *that*, not to rationalize a mismatch as
+  deliberate. Not a complete fix — an LLM can still misjudge intent — but it changes the
+  default from "describe what you see" to "assert what should be true," which is the correct
+  default for this job.
 
 - **Trust score formula**: `0.4 * unitTestPassRate + 0.4 * mutationScore + 0.2 * staticAnalysisCleanliness`.
   Unit tests and mutation score are weighted equally on the theory that a passing-but-weak

@@ -102,6 +102,16 @@ function buildPrompt(sourceFile: string, sourceContent: string, exampleTest: str
       'Never write a test that would pass regardless of the code under test (e.g. `expect(true).toBe(true)`, ' +
       "calling a function without checking what it returns/throws, or asserting on a mock instead of real behavior).",
   );
+  parts.push(
+    "- Assert the INTENDED behavior, not merely whatever the code currently happens to do. Infer intent from " +
+      "function/variable names, comments, error messages, and conventional behavior for this kind of code " +
+      "(e.g. a function called `login` that checks a password hash should reject a WRONG password and accept " +
+      "a CORRECT one — that's the intent, regardless of what the code currently does). If you notice the " +
+      "implementation looks like it might contradict its own apparent intent, do not rationalize it as " +
+      "deliberate or rewrite your assertion to match what you observed — write the test for the correct, " +
+      "intended behavior anyway. A test that fails against buggy code is doing its job; a test quietly rewritten " +
+      "to match a bug is not.",
+  );
   parts.push("- Match the existing codebase's module system (require/module.exports, not import/export) unless the module itself uses ES modules.");
   parts.push("- Do not modify or re-declare any global test setup; assume it's already in effect.");
   parts.push("- Respond with ONLY the test file's source code in a single fenced code block. No explanation.");
