@@ -67,7 +67,7 @@ export function loadConfig(): SentinelConfig {
     promotionThreshold: envFloat("SENTINEL_PROMOTION_THRESHOLD", 75),
     maxIterations: envInt("SENTINEL_MAX_ITERATIONS", 3),
     allowTestEdits: (process.env.SENTINEL_ALLOW_TEST_EDITS ?? "false") === "true",
-    repairModel: process.env.SENTINEL_REPAIR_MODEL ?? "gemini-2.5-flash-lite",
+    repairModel: process.env.SENTINEL_REPAIR_MODEL ?? "gemini-3.5-flash-lite",
     testDirs: (process.env.SENTINEL_TEST_DIRS ?? "tests,test,__tests__")
       .split(",")
       .map((s) => s.trim())
