@@ -2,6 +2,7 @@ import { createTwoFilesPatch } from "diff";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { SentinelConfig } from "./config.js";
+import { callGemini } from "./gemini.js";
 import { isTestFile, listSourceFiles, readFileSafe } from "./sourceFiles.js";
 import type { RepairAttempt, ValidationReport } from "./types.js";
 
@@ -77,43 +78,11 @@ function extractJson(raw: string): RepairResponse {
   return JSON.parse(jsonText) as RepairResponse;
 }
 
-interface GeminiResponse {
-  candidates?: { content?: { parts?: { text?: string }[] } }[];
-  error?: { message?: string };
-}
-
-/** Calls the Gemini REST API directly (no SDK dependency) and returns the raw text response. */
-async function callGemini(model: string, apiKey: string, prompt: string): Promise<string> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json" },
-      }),
-    },
-  );
-
-  const body = (await response.json()) as GeminiResponse;
-
-  if (!response.ok) {
-    throw new Error(`Gemini API returned ${response.status}: ${body.error?.message ?? JSON.stringify(body)}`);
-  }
-
-  const text = body.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error(`Gemini API returned no text content: ${JSON.stringify(body)}`);
-  }
-  return text;
-}
-
 /**
- * Sends the failure report + relevant source to Gemini and applies the
- * returned patch inside the sandbox's working copy. Runs on the host (needs
- * network for the API call) — see README for why this step is intentionally
- * outside the network-isolated container.
+ * "Bob" — sends the failure report + relevant source to Gemini and applies
+ * the returned patch inside the sandbox's working copy. Runs on the host
+ * (needs network for the API call) — see README for why this step is
+ * intentionally outside the network-isolated container.
  */
 export async function runRepair(
   targetDir: string,

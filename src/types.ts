@@ -66,6 +66,24 @@ export interface ValidationReport {
   threshold: number;
 }
 
+export interface GeneratedTest {
+  /** Path (relative to the target app root) the test file was written to. */
+  path: string;
+  /** Path (relative to the target app root) of the source file this test targets. */
+  sourceFile: string;
+  content: string;
+  /** Set if generation succeeded but the file couldn't be written/parsed as expected. */
+  error?: string;
+}
+
+export interface TestGenReport {
+  timestamp: string;
+  model: string;
+  /** Source files Alice was asked to cover (the PR's changed production files). */
+  targetFiles: string[];
+  generatedTests: GeneratedTest[];
+}
+
 export interface RepairAttempt {
   iteration: number;
   timestamp: string;
@@ -89,5 +107,7 @@ export interface RunHistory {
   startedAt: string;
   finishedAt?: string;
   outcome: "passed" | "blocked" | "in_progress";
+  /** Alice's output, if test generation ran (once, before the first iteration). */
+  testGen?: TestGenReport;
   iterations: IterationRecord[];
 }

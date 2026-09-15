@@ -3,6 +3,7 @@ import { aggregateTrustScore } from "./aggregator.js";
 import { loadConfig } from "./config.js";
 import { decide } from "./decisionGate.js";
 import { runMutationTesting } from "./mutationRunner.js";
+import { isTestFile } from "./sourceFiles.js";
 import { runStaticAnalysis } from "./staticAnalysis.js";
 import { emitEventLine } from "./telemetry.js";
 import { runTests } from "./testRunner.js";
@@ -36,8 +37,20 @@ async function main(): Promise<void> {
   const staticAnalysisResult = await runStaticAnalysis(targetDir, ESLINT_FALLBACK_CONFIG);
   emitEventLine("static_analysis", "end", staticAnalysisResult);
 
+  // SENTINEL_CHANGED_FILES (comma-separated, set by the host from the PR diff)
+  // scopes mutation testing to just this PR's changed production files —
+  // undefined means "no scoping info available," which falls back to the
+  // fallback config's broad mutate patterns rather than mutating nothing.
+  const changedFilesRaw = process.env.SENTINEL_CHANGED_FILES;
+  const mutateFiles = changedFilesRaw
+    ? changedFilesRaw
+        .split(",")
+        .map((f) => f.trim())
+        .filter((f) => f && /\.(js|jsx|ts|tsx)$/.test(f) && !isTestFile(f, config.testDirs))
+    : undefined;
+
   emitEventLine("mutation", "start");
-  const mutationResult = await runMutationTesting(targetDir, STRYKER_FALLBACK_CONFIG);
+  const mutationResult = await runMutationTesting(targetDir, STRYKER_FALLBACK_CONFIG, mutateFiles);
   emitEventLine("mutation", "end", mutationResult);
 
   const score = aggregateTrustScore(testResult, staticAnalysisResult, mutationResult, config.weights);

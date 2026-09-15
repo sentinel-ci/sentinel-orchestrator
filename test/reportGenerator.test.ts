@@ -67,7 +67,7 @@ describe("renderMarkdownReport", () => {
     };
     const md = renderMarkdownReport(history);
     expect(md).toContain("blocked");
-    expect(md).toContain("Repair attempt");
+    expect(md).toContain("Bob (repair agent)");
     expect(md).toContain("src/a.js");
   });
 

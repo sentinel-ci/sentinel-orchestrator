@@ -67,6 +67,25 @@ export async function openPromotionPr(
   });
 }
 
+export interface ChangedFile {
+  filename: string;
+  status: "added" | "modified" | "removed" | "renamed" | "copied" | "changed" | "unchanged";
+}
+
+/** Lists files changed in a PR (paginated, capped at 1000 files — plenty for scoping test generation / mutation testing). */
+export async function listChangedFiles(target: GithubTarget, prNumber: number): Promise<ChangedFile[]> {
+  const files: ChangedFile[] = [];
+  for (let page = 1; page <= 10; page += 1) {
+    const batch = await githubRequest<ChangedFile[]>(
+      target,
+      `/repos/${target.owner}/${target.repo}/pulls/${prNumber}/files?per_page=100&page=${page}`,
+    );
+    files.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return files;
+}
+
 export function githubTargetFromEnv(): GithubTarget {
   const token = process.env.GITHUB_TOKEN;
   const repository = process.env.GITHUB_REPOSITORY; // "owner/repo"

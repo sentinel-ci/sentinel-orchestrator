@@ -1,4 +1,4 @@
-import type { IterationRecord, RunHistory, ValidationReport } from "./types.js";
+import type { IterationRecord, RunHistory, TestGenReport, ValidationReport } from "./types.js";
 
 function fmt(n: number): string {
   return n.toFixed(1);
@@ -66,7 +66,7 @@ function renderIteration(record: IterationRecord): string {
   lines.push(renderValidation(record.validation));
 
   if (record.repair) {
-    lines.push(`**Repair attempt** (model: \`${record.repair.model}\`)`);
+    lines.push(`**🤖 Bob (repair agent)** — model: \`${record.repair.model}\``);
     lines.push("");
     if (record.repair.error) {
       lines.push(`Repair failed: ${record.repair.error}`);
@@ -80,6 +80,27 @@ function renderIteration(record: IterationRecord): string {
     lines.push("");
   }
 
+  return lines.join("\n");
+}
+
+function renderTestGen(testGen: TestGenReport): string {
+  const lines: string[] = [
+    `**🧪 Alice (test generation agent)** — model: \`${testGen.model}\`, ${testGen.generatedTests.length} file(s) generated for ${testGen.targetFiles.length} changed module(s)`,
+    "",
+  ];
+  for (const t of testGen.generatedTests) {
+    if (t.error) {
+      lines.push(`- \`${t.sourceFile}\`: failed — ${t.error}`);
+      continue;
+    }
+    lines.push(`<details><summary>\`${t.path}\` (covers \`${t.sourceFile}\`)</summary>`);
+    lines.push("");
+    lines.push("```javascript");
+    lines.push(t.content.slice(0, 4000));
+    lines.push("```");
+    lines.push("</details>");
+  }
+  lines.push("");
   return lines.join("\n");
 }
 
@@ -98,6 +119,12 @@ export function renderMarkdownReport(history: RunHistory): string {
     lines.push(
       `Final trust score: **${fmt(latest.validation.score.trustScore)} / ${latest.validation.threshold}** after ${history.iterations.length} iteration(s).`,
     );
+    lines.push("");
+  }
+
+  if (history.testGen && history.testGen.generatedTests.length > 0) {
+    lines.push(renderTestGen(history.testGen));
+    lines.push("---");
     lines.push("");
   }
 

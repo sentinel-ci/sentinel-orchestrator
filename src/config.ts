@@ -35,8 +35,14 @@ export interface SentinelConfig {
   maxIterations: number;
   /** Whether the repair agent may edit files under the configured test dirs. */
   allowTestEdits: boolean;
-  /** Gemini model used for repair. */
+  /** Gemini model used for repair ("Bob"). */
   repairModel: string;
+  /** Gemini model used for test generation ("Alice"). */
+  testGenModel: string;
+  /** Whether Alice runs at all. Off means only pre-existing repo tests are used. */
+  enableTestGeneration: boolean;
+  /** Cap on how many changed production files Alice generates tests for per run (cost control). */
+  maxTestGenFiles: number;
   /** Directory (relative to the target app root) treated as test code. */
   testDirs: string[];
   /** Where the target app source lives, mounted/copied into the sandbox. */
@@ -72,6 +78,9 @@ export function loadConfig(): SentinelConfig {
     maxIterations: envInt("SENTINEL_MAX_ITERATIONS", 3),
     allowTestEdits: (process.env.SENTINEL_ALLOW_TEST_EDITS ?? "false") === "true",
     repairModel: process.env.SENTINEL_REPAIR_MODEL ?? "gemini-3.5-flash-lite",
+    testGenModel: process.env.SENTINEL_TEST_GEN_MODEL ?? "gemini-3.5-flash-lite",
+    enableTestGeneration: (process.env.SENTINEL_ENABLE_TEST_GENERATION ?? "true") === "true",
+    maxTestGenFiles: envInt("SENTINEL_MAX_TEST_GEN_FILES", 8),
     testDirs: (process.env.SENTINEL_TEST_DIRS ?? "tests,test,__tests__")
       .split(",")
       .map((s) => s.trim())

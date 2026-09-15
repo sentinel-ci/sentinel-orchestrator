@@ -28,12 +28,34 @@ const SURVIVED_STATUSES = new Set(["Survived", "NoCoverage"]);
  * Runs StrykerJS against the target app and derives a mutation score plus the
  * list of survived mutants — the key signal for "this test suite wouldn't
  * actually catch a real bug."
+ *
+ * `mutateFiles`, when given a non-empty list, scopes mutation testing to just
+ * those files (typically the PR's changed production files) via Stryker's
+ * `--mutate` flag, which overrides the config file's own `mutate` patterns.
+ * This is both a cost optimization (mutating the whole repo on every PR
+ * doesn't scale) and arguably more correct — a PR should be judged on
+ * whether ITS changes are well-tested, not re-graded on unrelated legacy
+ * code's mutation score every time.
  */
 export async function runMutationTesting(
   targetDir: string,
   fallbackConfigPath: string,
+  mutateFiles?: string[],
 ): Promise<MutationRunResult> {
   const configArg = (await hasOwnConfig(targetDir)) ? [] : [fallbackConfigPath];
+
+  if (mutateFiles && mutateFiles.length === 0) {
+    return {
+      mutationScore: -1,
+      killed: 0,
+      survived: 0,
+      totalMutants: 0,
+      survivedMutants: [],
+      skipped: true,
+      skipReason: "No production files changed in this PR — nothing to mutate.",
+    };
+  }
+  const mutateArg = mutateFiles && mutateFiles.length > 0 ? ["--mutate", mutateFiles.join(",")] : [];
 
   const versionCheck = await runCommand("npx", ["--yes", "stryker", "--version"], {
     cwd: targetDir,
@@ -52,7 +74,7 @@ export async function runMutationTesting(
     };
   }
 
-  await runCommand("npx", ["--yes", "stryker", "run", ...configArg], {
+  await runCommand("npx", ["--yes", "stryker", "run", ...configArg, ...mutateArg], {
     cwd: targetDir,
     timeoutMs: 10 * 60 * 1000,
   }).catch(() => null); // Stryker exits non-zero when the score is below its own

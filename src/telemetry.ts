@@ -7,7 +7,7 @@ import type { SentinelConfig } from "./config.js";
  * All calls are no-ops when `config.dashboardUrl` is unset.
  */
 
-export type DashboardPhase = "build" | "tests" | "static_analysis" | "mutation" | "aggregate" | "repair";
+export type DashboardPhase = "build" | "test_generation" | "tests" | "static_analysis" | "mutation" | "aggregate" | "repair";
 
 export interface DashboardRun {
   runId: string;

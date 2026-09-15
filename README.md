@@ -1,9 +1,11 @@
 # sentinel-orchestrator
 
 The validation + repair engine for [Sentinel CI](https://github.com/sentinel-ci). Takes a
-target app, runs it through a sandboxed test → lint → mutation-testing pass, turns the
-result into a single 0-100 trust score, and — if the score misses the threshold — asks
-Gemini to repair the code and tries again, up to a bounded number of iterations.
+target app, has **Alice** write real tests for whatever the PR actually changed, runs the
+whole thing through a sandboxed test → lint → mutation-testing pass scoped to those same
+changed files, turns the result into a single 0-100 trust score, and — if the score misses
+the threshold — has **Bob** repair the code and tries again, up to a bounded number of
+iterations.
 
 This repo is the reusable engine. It doesn't contain a target app itself; it validates
 whatever app is checked out alongside it in CI (see `sentinel-ci/sandbox-test` for the
@@ -14,34 +16,75 @@ current demo app and the workflow that wires the two together).
 ```
                          ┌─────────────────────────────────────────┐
  GitHub Actions runner   │  orchestrate.ts (host, has network)      │
- (sandbox-test's         │  - resolves PR number                    │
-  sentinel.yml)          │  - creates a sentinel-dashboard run,     │
+ (sandbox-test's         │  - resolves PR number, lists changed     │
+  sentinel.yml)          │    files via the GitHub API               │
+                         │  - creates a sentinel-dashboard run,     │
                          │    posts "watch live" PR comment         │
                          │  - runs the retry loop                   │
                          │  - updates PR comment with final report  │
                          │  - opens promotion PR / adds block label  │
-                         │  - calls Gemini (repairAgent.ts)          │
                          └───────────────┬───────────────────────────┘
+                                          │
+                          once, before the first iteration:
+                          🧪 Alice (aliceAgent.ts) writes a new Jest
+                          test file for each changed production file
+                                          │
                                           │ docker build && docker run
                                           │   --network=none --memory=512m --cpus=1
                                           │   (host tails container stdout live)
                                           ▼
                          ┌─────────────────────────────────────────┐
  sandbox container       │  validate.ts (in-container, no network)  │
-                         │  - testRunner.ts    (Jest)                │
+                         │  - testRunner.ts    (Jest — incl. Alice's) │
                          │  - staticAnalysis.ts (ESLint)             │
-                         │  - mutationRunner.ts (StrykerJS)          │
+                         │  - mutationRunner.ts (StrykerJS, scoped   │
+                         │    to the PR's changed files)             │
                          │  - aggregator.ts    (trust score)         │
                          │  writes SENTINEL_EVENT: marker lines to   │
                          │  stdout at each phase boundary            │
-                         └─────────────────────────────────────────┘
+                         └───────────────┬─────────────────────────┘
+                                          │ trust score below threshold
+                                          ▼
+                          🤖 Bob (repairAgent.ts, host, has network)
+                          patches the working copy, loop rebuilds
+                          and re-validates
 ```
 
 Each retry iteration rebuilds the sandbox image (Docker layer caching keeps this cheap —
 `npm ci` and the tooling-install layers don't change between iterations, only the final
-`COPY` layers do) and reruns `validate.ts` inside it. `orchestrate.ts` on the host applies
-the repair patch to the checked-out working copy between iterations, then triggers the
-next build.
+`COPY` layers do) and reruns `validate.ts` inside it. Bob applies his patch to the checked-out
+working copy between iterations, then the loop triggers the next build. Alice, unlike Bob,
+runs exactly once per run (not once per iteration) — her generated tests just become part of
+the test suite every iteration re-runs, same as any pre-existing test.
+
+### Alice and Bob share one Gemini client (`gemini.ts`)
+
+Both agents call the same `callGemini`/`callGeminiForText` helpers — the only difference is
+Bob asks for structured JSON (a list of file patches) and Alice asks for raw source code in
+a fenced block. Neither agent's code lives inside the sandbox; both need network to reach
+Gemini, so both run on the host, same reasoning as the "why the repair agent runs on the
+host" section below.
+
+### Why mutation testing (and Alice) are scoped to the PR's changed files, not the whole repo
+
+Two independent reasons converged on the same answer:
+
+1. **Cost.** Re-mutating the entire codebase on every PR doesn't scale, and arguably isn't
+   even the right question — a PR should be judged on whether *its* changes are well-tested,
+   not re-graded on unrelated legacy code's mutation score every time.
+2. **It fixes the mongo-per-mutant slowness documented below, organically.** When mutation
+   testing is scoped to a file that only Alice's new test file exercises, Stryker's per-test
+   coverage analysis runs *only that test file* per mutant — not the full suite. Verified
+   directly: mutating a small new module with Alice's generated tests took **36 seconds for
+   35 mutants** (100% killed), versus the ~30s/mutant, ~10-minute-budget-exhausting behavior
+   measured earlier against the full suite. Scoping to changed files doesn't fix the
+   underlying per-suite-run cost for a large *existing* file with lots of correlated test
+   coverage, but for the common case of new/changed logic with its own new test, it mostly
+   resolves itself.
+
+`SENTINEL_CHANGED_FILES` (comma-separated, set by `orchestrate.ts` from the GitHub PR-files
+API) carries this scope from the host into the sandboxed `validate.ts` via `docker run -e`,
+since the container has no network to look it up itself.
 
 ### Live dashboard reporting (optional)
 
@@ -75,10 +118,12 @@ with the final markdown report still gets posted either way.
 | `src/aggregator.ts` | Combines the three signals into a weighted 0-100 trust score |
 | `src/reportGenerator.ts` | Renders the markdown (PR comment) and JSON (artifact) reports |
 | `src/decisionGate.ts` | Pure `trustScore/threshold/iteration -> pass \| repair \| block` |
-| `src/repairAgent.ts` | Sends the failure report to Gemini, applies the returned patch |
-| `src/retryLoop.ts` | Bounded validate → repair → re-validate loop |
+| `src/aliceAgent.ts` | "Alice" — generates a new Jest test file per changed production file |
+| `src/repairAgent.ts` | "Bob" — sends the failure report to Gemini, applies the returned patch |
+| `src/gemini.ts` | Shared Gemini REST client used by both Alice and Bob |
+| `src/retryLoop.ts` | Bounded validate → repair → re-validate loop; runs Alice once up front |
 | `src/sandbox.ts` | `docker build`/`docker run` wrapper (BuildKit named contexts) |
-| `src/githubClient.ts` | PR comments, labels, opening the staging→production promotion PR |
+| `src/githubClient.ts` | PR comments, labels, listing changed files, opening the staging→production promotion PR |
 | `src/validate.ts` | In-container entrypoint (test + lint + mutation + score, one pass) |
 | `src/orchestrate.ts` | Host entrypoint (retry loop + GitHub side effects) |
 | `src/telemetry.ts` | Best-effort client for a sentinel-dashboard deployment; also the `SENTINEL_EVENT:` marker-line protocol between `validate.ts` and the host |
@@ -109,6 +154,23 @@ that reintroduces the same build/runtime dependency-install split this design al
 solves cleanly. Documented here rather than silently deviating from the plan.
 
 ## Open Design Decisions (resolved defaults — reconsider before relying on them)
+
+- **Alice generates tests, she doesn't validate her own imports by construction — the
+  require path is computed by our code and handed to her, not guessed.** First version of
+  this let Alice guess the relative `require()` path from her own test file back to the
+  source module. She got it wrong (off by one directory level — she has no way to know
+  where her own output file will land ahead of generating it) and every generated test
+  failed with "Cannot find module." Fixed by computing the exact relative path in
+  `aliceAgent.ts` (`computeRequireSpecifier`) and stating it explicitly in the prompt rather
+  than leaving it to the model. Verified: re-ran against a real new module and got 8/8
+  passing tests with genuinely meaningful assertions (validated edge cases, error paths,
+  rounding behavior) — see the "mutation testing scoped to changed files" section above for
+  the mutation-score proof that they're not just passing, they're catching real faults.
+- **Alice never edits existing tests, only adds new files** — she has no path to "fix" a low
+  score by weakening coverage, same reasoning as Bob's test-edit restriction.
+- **Alice's test-gen scope and mutation-testing's scope are the same list** (the PR's changed
+  production files) rather than two independently-tuned scopes, for consistency: whatever
+  the PR touched is both what gets a fresh test and what gets mutated.
 
 - **Trust score formula**: `0.4 * unitTestPassRate + 0.4 * mutationScore + 0.2 * staticAnalysisCleanliness`.
   Unit tests and mutation score are weighted equally on the theory that a passing-but-weak
@@ -171,7 +233,10 @@ All of the above are env vars, read in `src/config.ts`:
 | `SENTINEL_PROMOTION_THRESHOLD` | `75` |
 | `SENTINEL_MAX_ITERATIONS` | `3` |
 | `SENTINEL_ALLOW_TEST_EDITS` | `false` |
-| `SENTINEL_REPAIR_MODEL` | `gemini-3.5-flash-lite` |
+| `SENTINEL_REPAIR_MODEL` | `gemini-3.5-flash-lite` (Bob) |
+| `SENTINEL_TEST_GEN_MODEL` | `gemini-3.5-flash-lite` (Alice) |
+| `SENTINEL_ENABLE_TEST_GENERATION` | `true` — set `"false"` to disable Alice entirely |
+| `SENTINEL_MAX_TEST_GEN_FILES` | `8` — cap on changed files Alice generates tests for per run |
 | `SENTINEL_TEST_DIRS` | `tests,test,__tests__` |
 | `SENTINEL_PR_NUMBER` | (read from `GITHUB_EVENT_PATH` if unset) |
 | `SENTINEL_CHECKOUT_DIR` | `process.cwd()` — the target app's checked-out path |

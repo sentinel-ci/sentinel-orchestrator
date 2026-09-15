@@ -1,10 +1,18 @@
 #!/usr/bin/env node
-import { readFile } from "node:fs/promises";
+import { appendFile, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { loadConfig } from "./config.js";
-import { addLabels, githubTargetFromEnv, openPromotionPr, postPrComment, updatePrComment } from "./githubClient.js";
+import {
+  addLabels,
+  githubTargetFromEnv,
+  listChangedFiles,
+  openPromotionPr,
+  postPrComment,
+  updatePrComment,
+} from "./githubClient.js";
 import { renderMarkdownReport } from "./reportGenerator.js";
 import { runRetryLoop } from "./retryLoop.js";
+import { isTestFile } from "./sourceFiles.js";
 import { createDashboardRun } from "./telemetry.js";
 
 interface PullRequestEvent {
@@ -27,6 +35,13 @@ async function resolvePrContext(): Promise<PrContext> {
   return { number: event.pull_request.number, title: event.pull_request.title, url: event.pull_request.html_url };
 }
 
+/** Appends to the GitHub Actions run's own summary page, so the live dashboard link is visible there too — not just in the PR comment — while a run is still in progress. No-op outside Actions (env var unset). */
+async function writeJobSummary(markdown: string): Promise<void> {
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (!summaryPath) return;
+  await appendFile(summaryPath, `${markdown}\n`, "utf8").catch(() => {});
+}
+
 /**
  * Entry point run on the GitHub Actions runner (has network — needed for the
  * repair agent's Gemini calls and for posting back to the GitHub API). Wraps
@@ -40,6 +55,15 @@ async function main(): Promise<void> {
   const dockerfile = resolve(orchestratorDir, "sandbox", "Dockerfile");
 
   const github = githubTargetFromEnv();
+
+  const changedFiles = await listChangedFiles(github, pr.number).catch((err) => {
+    console.warn(`Could not list changed files (falling back to unscoped test-gen/mutation): ${(err as Error).message}`);
+    return [];
+  });
+  const changedProductionFiles = changedFiles
+    .filter((f) => f.status !== "removed")
+    .map((f) => f.filename)
+    .filter((f) => /\.(js|jsx|ts|tsx)$/.test(f) && !isTestFile(f, config.testDirs));
 
   const dashboardRun = await createDashboardRun(config, {
     repo: `${github.owner}/${github.repo}`,
@@ -56,6 +80,7 @@ async function main(): Promise<void> {
       `## \u{1F50D} Sentinel CI started\n\n[Watch this run live](${dashboardRun.url}) — updates as each phase completes, no need to refresh.`,
     );
     liveCommentId = id;
+    await writeJobSummary(`### 🔍 Sentinel CI\n\n[Watch this run live](${dashboardRun.url})\n`);
   }
 
   const history = await runRetryLoop({
@@ -65,6 +90,7 @@ async function main(): Promise<void> {
     orchestratorDir,
     config,
     dashboardRunId: dashboardRun?.runId,
+    changedProductionFiles,
   });
 
   const report =
@@ -74,6 +100,12 @@ async function main(): Promise<void> {
     await updatePrComment(github, liveCommentId, report);
   } else {
     await postPrComment(github, pr.number, report);
+  }
+
+  if (dashboardRun) {
+    await writeJobSummary(
+      `\n### Result: ${history.outcome === "passed" ? "✅ passed" : "❌ blocked"}\n\n[Full live run](${dashboardRun.url})\n`,
+    );
   }
 
   if (history.outcome === "passed") {
