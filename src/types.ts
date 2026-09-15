@@ -84,12 +84,22 @@ export interface TestGenReport {
   generatedTests: GeneratedTest[];
 }
 
+export interface FileDiff {
+  path: string;
+  diff: string;
+}
+
 export interface RepairAttempt {
   iteration: number;
   timestamp: string;
   prompt: string;
   model: string;
+  /** Bob's own one-line-ish explanation of what he changed and why — surfaced as-is in the report/dashboard. */
+  summary?: string;
   filesChanged: string[];
+  /** Per-file diffs for files that actually changed (files Bob echoed back unmodified are filtered out before this point). */
+  fileDiffs: FileDiff[];
+  /** All of fileDiffs concatenated — kept for the markdown report / anything that just wants one blob. */
   diff: string;
   rawResponse: string;
   applied: boolean;

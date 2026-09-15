@@ -1,5 +1,5 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join, relative, sep } from "node:path";
+import { access, mkdir, writeFile } from "node:fs/promises";
+import { basename, dirname, join, relative, sep } from "node:path";
 import type { SentinelConfig } from "./config.js";
 import { callGeminiForText, extractFencedCode } from "./gemini.js";
 import { isTestFile, listSourceFiles, readFileSafe } from "./sourceFiles.js";
@@ -10,11 +10,58 @@ function generatedTestPath(testDir: string, sourceFile: string): string {
   return join(testDir, "alice-generated", `${flat}.alice.test.js`);
 }
 
-/** Relative-import specifier from the generated test's own location to the source module, e.g. "../../utils/discount". Computed here (not guessed by the model) since Alice has no way to know her own output path ahead of time. */
-function computeRequireSpecifier(targetDir: string, testPath: string, sourceFile: string): string {
-  const raw = relative(dirname(join(targetDir, testPath)), join(targetDir, sourceFile)).replace(/\.js$/, "");
+/** Relative-import specifier from the generated test's own location to some repo-relative target path, e.g. "../../utils/discount". Computed here (not guessed by the model) since Alice has no way to know her own output path ahead of time. */
+function computeRequireSpecifier(targetDir: string, testPath: string, destFile: string): string {
+  const raw = relative(dirname(join(targetDir, testPath)), join(targetDir, destFile)).replace(/\.js$/, "");
   const posix = raw.split(sep).join("/");
   return posix.startsWith(".") ? posix : `./${posix}`;
+}
+
+/**
+ * Regex-scans generated code for relative `require(...)` calls that don't
+ * actually resolve, and fixes them by finding a same-named file elsewhere in
+ * the repo — a safety net behind the prompt instructions, not a replacement
+ * for them. Necessary because Bob (the repair agent) is deliberately barred
+ * from editing test files, so if Alice's own import path is wrong, nothing
+ * downstream can ever fix it — confirmed for real: a demo run got stuck at
+ * an unchanged 0/0-tests score for its entire repair budget because Alice's
+ * test crashed on a bad `require('../store')` (should've been `../../store`)
+ * and Bob had no path to touch it.
+ */
+async function fixRequirePaths(code: string, testAbsolutePath: string, targetDir: string): Promise<string> {
+  const pattern = /require\(\s*(['"])(\.\.?\/[^'"]+)\1\s*\)/g;
+  const testDir = dirname(testAbsolutePath);
+  let fixed = code;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(code)) !== null) {
+    const [full, quote, importPath] = match;
+    const resolved = await resolvesToFile(join(testDir, importPath));
+    if (resolved) continue;
+
+    const wanted = basename(importPath).replace(/\.js$/, "");
+    const candidates = (await listSourceFiles(targetDir)).filter(
+      (f) => !f.includes("alice-generated") && basename(f).replace(/\.js$/, "") === wanted,
+    );
+    if (candidates.length !== 1) continue; // ambiguous or no match — leave it, testRunner will surface the real error
+
+    const correctSpecifier = computeRequireSpecifier(targetDir, relative(targetDir, testAbsolutePath), candidates[0]);
+    fixed = fixed.replace(full, `require(${quote}${correctSpecifier}${quote})`);
+  }
+
+  return fixed;
+}
+
+async function resolvesToFile(pathWithoutKnownExtension: string): Promise<boolean> {
+  for (const candidate of [pathWithoutKnownExtension, `${pathWithoutKnownExtension}.js`, join(pathWithoutKnownExtension, "index.js")]) {
+    try {
+      await access(candidate);
+      return true;
+    } catch {
+      // keep trying
+    }
+  }
+  return false;
 }
 
 function buildPrompt(sourceFile: string, sourceContent: string, exampleTest: string | null, requireSpecifier: string): string {
@@ -28,7 +75,9 @@ function buildPrompt(sourceFile: string, sourceContent: string, exampleTest: str
   parts.push(`## Module to test: ${sourceFile}`);
   parts.push(
     `Import it with exactly this path (this accounts for where your test file will actually be saved — ` +
-      `do not guess a different relative path): \`require("${requireSpecifier}")\``,
+      `do not guess a different relative path): \`require("${requireSpecifier}")\`. If you need to import ` +
+      "ANY other file from this repo (a shared store, a helper, etc.), apply the same relative depth — " +
+      `e.g. a file at the repo root needs the same number of \`../\` segments as shown above.`,
   );
   parts.push("```javascript");
   parts.push(sourceContent);
@@ -95,8 +144,9 @@ export async function runTestGeneration(
 
     try {
       const raw = await callGeminiForText(config.testGenModel, apiKey, prompt);
-      const code = extractFencedCode(raw);
+      const generated = extractFencedCode(raw);
       const absolutePath = join(targetDir, relativeTestPath);
+      const code = await fixRequirePaths(generated, absolutePath, targetDir);
       await mkdir(dirname(absolutePath), { recursive: true });
       await writeFile(absolutePath, code, "utf8");
       generatedTests.push({ path: relativeTestPath, sourceFile, content: code });

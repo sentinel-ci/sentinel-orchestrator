@@ -12,6 +12,9 @@ interface JestAssertionResult {
 
 interface JestTestResult {
   assertionResults: JestAssertionResult[];
+  /** Non-empty when the whole suite failed before any test ran (require error, syntax error, etc.) — the individual assertionResults list is empty in that case, so this is the only place the failure shows up. */
+  message?: string;
+  testFilePath?: string;
 }
 
 interface JestAggregatedResult {
@@ -63,6 +66,7 @@ export async function runTests(targetDir: string): Promise<TestRunResult> {
     }
 
     const failures: TestFailure[] = [];
+    let crashedSuites = 0;
     for (const testResult of parsed.testResults) {
       for (const assertion of testResult.assertionResults) {
         if (assertion.status === "failed") {
@@ -72,12 +76,26 @@ export async function runTests(targetDir: string): Promise<TestRunResult> {
           });
         }
       }
+      // A suite that fails before any test runs (require error, syntax error)
+      // contributes zero to numTotalTests and has no assertionResults, so
+      // without this it's completely invisible to the trust score, the
+      // hasFailingTests gate, and Bob's repair context alike — confirmed for
+      // real: Alice generated a test with a wrong import path, the suite
+      // crashed, and the report showed a clean-looking "0/0 tests" with no
+      // indication anything was wrong.
+      if (testResult.assertionResults.length === 0 && testResult.message) {
+        crashedSuites += 1;
+        failures.push({
+          name: testResult.testFilePath ?? "test suite",
+          message: tail(testResult.message, 1500),
+        });
+      }
     }
 
     return {
       passed: parsed.numPassedTests,
-      failed: parsed.numFailedTests,
-      total: parsed.numTotalTests,
+      failed: parsed.numFailedTests + crashedSuites,
+      total: parsed.numTotalTests + crashedSuites,
       failures,
       rawOutputTail: tail(result.stdout + "\n" + result.stderr),
     };

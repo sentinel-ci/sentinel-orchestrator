@@ -122,7 +122,15 @@ export async function runRetryLoop(options: RetryLoopOptions): Promise<RunHistor
     await postDashboardEvent(config, dashboardRunId, {
       type: "repair_end",
       iteration,
-      data: { model: repair.model, applied: repair.applied, filesChanged: repair.filesChanged, diff: repair.diff, error: repair.error },
+      data: {
+        model: repair.model,
+        summary: repair.summary,
+        applied: repair.applied,
+        filesChanged: repair.filesChanged,
+        fileDiffs: repair.fileDiffs,
+        diff: repair.diff,
+        error: repair.error,
+      },
     });
     await postDashboardEvent(config, dashboardRunId, { type: "iteration_complete", iteration });
 

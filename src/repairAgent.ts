@@ -121,6 +121,7 @@ export async function runRepair(
       prompt,
       model: config.repairModel,
       filesChanged: [],
+      fileDiffs: [],
       diff: "",
       rawResponse: "",
       applied: false,
@@ -138,6 +139,7 @@ export async function runRepair(
       prompt,
       model: config.repairModel,
       filesChanged: [],
+      fileDiffs: [],
       diff: "",
       rawResponse: "",
       applied: false,
@@ -155,6 +157,7 @@ export async function runRepair(
       prompt,
       model: config.repairModel,
       filesChanged: [],
+      fileDiffs: [],
       diff: "",
       rawResponse,
       applied: false,
@@ -163,7 +166,7 @@ export async function runRepair(
   }
 
   const filesChanged: string[] = [];
-  const diffs: string[] = [];
+  const fileDiffs: { path: string; diff: string }[] = [];
   const rejected: string[] = [];
 
   for (const change of parsed.changes ?? []) {
@@ -177,21 +180,31 @@ export async function runRepair(
     }
 
     const before = fileContents.get(change.path) ?? "";
+    if (change.content === before) {
+      // The model echoed this file back unchanged — not a real edit, and
+      // reporting it as one just clutters the report/dashboard with
+      // "files changed" that have nothing in their diff.
+      continue;
+    }
+
     const absolutePath = join(targetDir, change.path);
     await mkdir(dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, change.content, "utf8");
     filesChanged.push(change.path);
-    diffs.push(createTwoFilesPatch(change.path, change.path, before, change.content));
+    fileDiffs.push({ path: change.path, diff: createTwoFilesPatch(change.path, change.path, before, change.content) });
   }
 
-  const diff = [rejected.map((r) => `# rejected: ${r}`).join("\n"), ...diffs].filter(Boolean).join("\n\n");
+  const rejectedNote = rejected.map((r) => `# rejected: ${r}`).join("\n");
+  const diff = [rejectedNote, ...fileDiffs.map((f) => f.diff)].filter(Boolean).join("\n\n");
 
   return {
     iteration,
     timestamp,
     prompt,
     model: config.repairModel,
+    summary: parsed.summary,
     filesChanged,
+    fileDiffs,
     diff,
     rawResponse,
     applied: filesChanged.length > 0,

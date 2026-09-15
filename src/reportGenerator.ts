@@ -68,14 +68,23 @@ function renderIteration(record: IterationRecord): string {
   if (record.repair) {
     lines.push(`**🤖 Bob (repair agent)** — model: \`${record.repair.model}\``);
     lines.push("");
+    if (record.repair.summary) {
+      lines.push(`> 💬 ${record.repair.summary}`);
+      lines.push("");
+    }
     if (record.repair.error) {
       lines.push(`Repair failed: ${record.repair.error}`);
+    } else if (record.repair.fileDiffs.length === 0) {
+      lines.push("No files were actually changed.");
     } else {
-      lines.push(`Files changed: ${record.repair.filesChanged.map((f) => `\`${f}\``).join(", ") || "none"}`);
-      lines.push("");
-      lines.push("```diff");
-      lines.push(record.repair.diff.slice(0, 6000));
-      lines.push("```");
+      for (const f of record.repair.fileDiffs) {
+        lines.push(`<details><summary>\`${f.path}\`</summary>`);
+        lines.push("");
+        lines.push("```diff");
+        lines.push(f.diff.slice(0, 4000));
+        lines.push("```");
+        lines.push("</details>");
+      }
     }
     lines.push("");
   }
