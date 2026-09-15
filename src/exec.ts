@@ -10,7 +10,13 @@ export interface ExecResult {
 export function runCommand(
   command: string,
   args: string[],
-  options: { cwd: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = { cwd: process.cwd() },
+  options: {
+    cwd: string;
+    env?: NodeJS.ProcessEnv;
+    timeoutMs?: number;
+    /** Called with each raw stdout chunk as it arrives, in addition to the buffered result — for live-streaming a long-running command's output. */
+    onStdout?: (chunk: string) => void;
+  } = { cwd: process.cwd() },
 ): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -45,7 +51,9 @@ export function runCommand(
       : undefined;
 
     child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
+      const text = chunk.toString();
+      stdout += text;
+      options.onStdout?.(text);
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();

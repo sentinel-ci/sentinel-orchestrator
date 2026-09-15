@@ -15,12 +15,16 @@ current demo app and the workflow that wires the two together).
                          ┌─────────────────────────────────────────┐
  GitHub Actions runner   │  orchestrate.ts (host, has network)      │
  (sandbox-test's         │  - resolves PR number                    │
-  sentinel.yml)          │  - runs the retry loop                   │
-                         │  - posts PR comment / opens promotion PR  │
+  sentinel.yml)          │  - creates a sentinel-dashboard run,     │
+                         │    posts "watch live" PR comment         │
+                         │  - runs the retry loop                   │
+                         │  - updates PR comment with final report  │
+                         │  - opens promotion PR / adds block label  │
                          │  - calls Gemini (repairAgent.ts)          │
                          └───────────────┬───────────────────────────┘
                                           │ docker build && docker run
                                           │   --network=none --memory=512m --cpus=1
+                                          │   (host tails container stdout live)
                                           ▼
                          ┌─────────────────────────────────────────┐
  sandbox container       │  validate.ts (in-container, no network)  │
@@ -28,6 +32,8 @@ current demo app and the workflow that wires the two together).
                          │  - staticAnalysis.ts (ESLint)             │
                          │  - mutationRunner.ts (StrykerJS)          │
                          │  - aggregator.ts    (trust score)         │
+                         │  writes SENTINEL_EVENT: marker lines to   │
+                         │  stdout at each phase boundary            │
                          └─────────────────────────────────────────┘
 ```
 
@@ -36,6 +42,28 @@ Each retry iteration rebuilds the sandbox image (Docker layer caching keeps this
 `COPY` layers do) and reruns `validate.ts` inside it. `orchestrate.ts` on the host applies
 the repair patch to the checked-out working copy between iterations, then triggers the
 next build.
+
+### Live dashboard reporting (optional)
+
+If `SENTINEL_DASHBOARD_URL` is set, `retryLoop.ts` creates a run on a
+[sentinel-dashboard](https://github.com/sentinel-ci/sentinel-dashboard) deployment before
+the first iteration and `orchestrate.ts` immediately posts a PR comment linking to it — so
+a human can watch the run happen instead of only seeing raw GitHub Actions logs, and only
+finding out the outcome once everything is already done.
+
+The sandbox container is `--network=none` and genuinely cannot call the dashboard itself.
+Instead, `validate.ts` writes `SENTINEL_EVENT:{"phase":...,"kind":"start"|"end","data":...}`
+marker lines to its own stdout at each phase boundary; `sandbox.ts`'s `runValidationInSandbox`
+streams the container's stdout live (not just captured-and-parsed-at-exit) and `retryLoop.ts`
+relays each marker to the dashboard via `telemetry.ts` as it arrives. So progress is live at
+the *phase* granularity (build/tests/lint/mutation/score/repair, each iteration) — not
+literally line-by-line inside the sandboxed run, since that would mean giving untrusted PR
+code a way to phone out, which is exactly what `--network=none` exists to prevent.
+
+Every `telemetry.ts` call is best-effort and swallows its own errors: a dashboard being
+down, misconfigured, or simply not set up must never fail the actual validation/repair
+pipeline. Omit `SENTINEL_DASHBOARD_URL` entirely to skip this whole path — the PR comment
+with the final markdown report still gets posted either way.
 
 ### Module map
 
@@ -53,6 +81,7 @@ next build.
 | `src/githubClient.ts` | PR comments, labels, opening the staging→production promotion PR |
 | `src/validate.ts` | In-container entrypoint (test + lint + mutation + score, one pass) |
 | `src/orchestrate.ts` | Host entrypoint (retry loop + GitHub side effects) |
+| `src/telemetry.ts` | Best-effort client for a sentinel-dashboard deployment; also the `SENTINEL_EVENT:` marker-line protocol between `validate.ts` and the host |
 | `src/config.ts` | All thresholds/weights/budgets, env-driven |
 
 ## Why the repair agent runs on the host, not inside the sandbox
@@ -142,12 +171,14 @@ All of the above are env vars, read in `src/config.ts`:
 | `SENTINEL_PROMOTION_THRESHOLD` | `75` |
 | `SENTINEL_MAX_ITERATIONS` | `3` |
 | `SENTINEL_ALLOW_TEST_EDITS` | `false` |
-| `SENTINEL_REPAIR_MODEL` | `gemini-2.5-flash-lite` |
+| `SENTINEL_REPAIR_MODEL` | `gemini-3.5-flash-lite` |
 | `SENTINEL_TEST_DIRS` | `tests,test,__tests__` |
 | `SENTINEL_PR_NUMBER` | (read from `GITHUB_EVENT_PATH` if unset) |
 | `SENTINEL_CHECKOUT_DIR` | `process.cwd()` — the target app's checked-out path |
 | `SENTINEL_ORCHESTRATOR_DIR` | `process.cwd()` — this repo's checked-out path |
 | `SENTINEL_PRODUCTION_BRANCH` / `SENTINEL_STAGING_BRANCH` | `production` / `staging` |
+| `SENTINEL_DASHBOARD_URL` | unset (dashboard reporting skipped entirely) |
+| `SENTINEL_DASHBOARD_TOKEN` | must match the dashboard's `DASHBOARD_INGEST_TOKEN` |
 | `GEMINI_API_KEY` | required for the repair step to run |
 | `GITHUB_TOKEN` | required to post PR comments / open the promotion PR |
 

@@ -36,11 +36,25 @@ export async function runValidationInSandbox(
   tag: string,
   iteration: number,
   extraEnv: Record<string, string> = {},
+  onLine?: (line: string) => void,
 ): Promise<ValidationReport> {
   const envArgs: string[] = ["-e", `SENTINEL_ITERATION=${iteration}`];
   for (const [key, value] of Object.entries(extraEnv)) {
     envArgs.push("-e", `${key}=${value}`);
   }
+
+  // The container has no network of its own (--network=none) — it can only
+  // signal progress by writing marker lines to stdout. Buffer partial lines
+  // across chunks so onLine always sees whole lines.
+  let pending = "";
+  const onStdout = onLine
+    ? (chunk: string) => {
+        pending += chunk;
+        const lines = pending.split("\n");
+        pending = lines.pop() ?? "";
+        for (const line of lines) onLine(line);
+      }
+    : undefined;
 
   const result = await runCommand(
     "docker",
@@ -48,8 +62,9 @@ export async function runValidationInSandbox(
     // instances StrykerJS's test runner spins up per mutant, in particular)
     // get reaped instead of accumulating as zombies for the container's life.
     ["run", "--rm", "--init", "--memory=512m", "--cpus=1", "--network=none", ...envArgs, tag],
-    { cwd: process.cwd(), timeoutMs: 15 * 60 * 1000 },
+    { cwd: process.cwd(), timeoutMs: 15 * 60 * 1000, onStdout },
   );
+  if (onLine && pending) onLine(pending);
 
   const line = result.stdout.split("\n").find((l) => l.startsWith(REPORT_MARKER));
   if (!line) {

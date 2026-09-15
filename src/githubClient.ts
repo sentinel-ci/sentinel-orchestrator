@@ -33,9 +33,16 @@ export async function postPrComment(
   target: GithubTarget,
   prNumber: number,
   body: string,
-): Promise<void> {
-  await githubRequest(target, `/repos/${target.owner}/${target.repo}/issues/${prNumber}/comments`, {
+): Promise<{ id: number }> {
+  return githubRequest(target, `/repos/${target.owner}/${target.repo}/issues/${prNumber}/comments`, {
     method: "POST",
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function updatePrComment(target: GithubTarget, commentId: number, body: string): Promise<void> {
+  await githubRequest(target, `/repos/${target.owner}/${target.repo}/issues/comments/${commentId}`, {
+    method: "PATCH",
     body: JSON.stringify({ body }),
   });
 }

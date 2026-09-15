@@ -43,6 +43,10 @@ export interface SentinelConfig {
   targetDir: string;
   /** Where per-iteration run artifacts are written. */
   runsDir: string;
+  /** Base URL of a sentinel-dashboard deployment, e.g. https://sentinel.example.com. Live progress reporting is skipped entirely if unset. */
+  dashboardUrl?: string;
+  /** Shared ingest secret for the dashboard (must match its DASHBOARD_INGEST_TOKEN). */
+  dashboardToken?: string;
 }
 
 export function loadConfig(): SentinelConfig {
@@ -74,5 +78,7 @@ export function loadConfig(): SentinelConfig {
       .filter(Boolean),
     targetDir: process.env.SENTINEL_TARGET_DIR ?? "/target",
     runsDir: process.env.SENTINEL_RUNS_DIR ?? "./sentinel-runs",
+    dashboardUrl: process.env.SENTINEL_DASHBOARD_URL,
+    dashboardToken: process.env.SENTINEL_DASHBOARD_TOKEN,
   };
 }

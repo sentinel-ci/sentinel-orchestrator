@@ -2,13 +2,20 @@
 # Kept here (not pushed to sandbox-test) until reviewed — see PR description
 # for what changed and why.
 #
-# Requires two repo secrets on sandbox-test before this will work:
+# Requires repo secrets on sandbox-test before this will work:
 #   - GEMINI_API_KEY             for the repair agent
 #   - SENTINEL_ORCHESTRATOR_PAT  a token with read access to
 #     sentinel-ci/sentinel-orchestrator (it's currently a PRIVATE repo, so the
 #     default GITHUB_TOKEN scoped to sandbox-test can't check it out). Either
 #     add this PAT, or make sentinel-orchestrator public and delete the `token:`
 #     line below to use the default GITHUB_TOKEN instead.
+#   - SENTINEL_DASHBOARD_URL     optional — base URL of a sentinel-dashboard
+#     deployment (e.g. https://sentinel-dashboard.example.com). Omit this repo
+#     variable/secret entirely to skip live-dashboard reporting; the pipeline
+#     still runs and still posts its final report as a PR comment either way.
+#   - SENTINEL_DASHBOARD_TOKEN   required if SENTINEL_DASHBOARD_URL is set and
+#     that dashboard has DASHBOARD_INGEST_TOKEN configured (it should, for
+#     anything but local dev).
 name: Sentinel CI
 
 on:
@@ -55,6 +62,8 @@ jobs:
           SENTINEL_ORCHESTRATOR_DIR: ${{ github.workspace }}/sentinel-orchestrator
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SENTINEL_DASHBOARD_URL: ${{ secrets.SENTINEL_DASHBOARD_URL }}
+          SENTINEL_DASHBOARD_TOKEN: ${{ secrets.SENTINEL_DASHBOARD_TOKEN }}
         run: node dist/orchestrate.js
 
       - name: Upload run history
