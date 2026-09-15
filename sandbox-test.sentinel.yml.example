@@ -1,7 +1,14 @@
 # Proposed replacement for sandbox-test/.github/workflows/sentinel.yml.
 # Kept here (not pushed to sandbox-test) until reviewed — see PR description
-# for what changed and why. Copy this over .github/workflows/sentinel.yml in
-# sandbox-test once ANTHROPIC_API_KEY is added as a repo secret.
+# for what changed and why.
+#
+# Requires two repo secrets on sandbox-test before this will work:
+#   - ANTHROPIC_API_KEY          for the repair agent
+#   - SENTINEL_ORCHESTRATOR_PAT  a token with read access to
+#     sentinel-ci/sentinel-orchestrator (it's currently a PRIVATE repo, so the
+#     default GITHUB_TOKEN scoped to sandbox-test can't check it out). Either
+#     add this PAT, or make sentinel-orchestrator public and delete the `token:`
+#     line below to use the default GITHUB_TOKEN instead.
 name: Sentinel CI
 
 on:
@@ -28,6 +35,7 @@ jobs:
         with:
           repository: sentinel-ci/sentinel-orchestrator
           path: sentinel-orchestrator
+          token: ${{ secrets.SENTINEL_ORCHESTRATOR_PAT }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
