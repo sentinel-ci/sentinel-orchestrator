@@ -116,6 +116,19 @@ solves cleanly. Documented here rather than silently deviating from the plan.
   `scripts/prefetch-mongo.js` at build time *if the target app provides one* — a narrow,
   demo-app-specific convention rather than a general pre-test-setup hook. A real v2 would
   generalize this to something like `sentinel.setup.js`.
+- **Mutation testing has a bounded time budget (10 min by default), not an unbounded run**:
+  for `sandbox-test`, full mutation testing (168 mutants across app.js/config/models/routes/
+  server.js) takes on the order of an hour under `--cpus=1`, because its test setup spins up
+  a real (in-memory) MongoDB process fresh for every mutant — that cost is paid ~168 times,
+  not once. Rather than block the pipeline on that, `mutationRunner.ts` gives Stryker a fixed
+  time budget and treats a still-running Stryker process as "unavailable" (see the redistribute-
+  weight decision above), same as a crash. In production you'd want one of: (a) narrow
+  `stryker.default.config.json`'s `mutate` patterns to just the highest-value business logic,
+  (b) raise the budget and accept slower CI, or (c) fix it upstream — have the target app's
+  own test setup reuse one `MongoMemoryServer` for the whole suite instead of one per run.
+  (c) is a target-app testing-strategy change, out of scope here, but it's the real fix.
+  **This also means the retry loop's real-world iteration time is dominated by mutation
+  testing, not by the LLM call** — budget CI time accordingly.
 
 ## Configuration
 

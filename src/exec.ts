@@ -17,6 +17,12 @@ export function runCommand(
       cwd: options.cwd,
       env: options.env ?? process.env,
       shell: false,
+      // Own process group so a timeout can kill the whole tree (see below) —
+      // commands like `npx stryker run` spawn worker/child processes (test
+      // runners, mongod, ...) that a plain child.kill() would leave orphaned
+      // and still holding stdout open, so the "close" event would never fire
+      // and the timeout would silently do nothing.
+      detached: true,
     });
 
     let stdout = "";
@@ -26,7 +32,15 @@ export function runCommand(
     const timeout = options.timeoutMs
       ? setTimeout(() => {
           timedOut = true;
-          child.kill("SIGKILL");
+          if (child.pid) {
+            try {
+              process.kill(-child.pid, "SIGKILL");
+            } catch {
+              child.kill("SIGKILL");
+            }
+          } else {
+            child.kill("SIGKILL");
+          }
         }, options.timeoutMs)
       : undefined;
 

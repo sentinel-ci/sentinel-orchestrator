@@ -44,7 +44,10 @@ export async function runValidationInSandbox(
 
   const result = await runCommand(
     "docker",
-    ["run", "--rm", "--memory=512m", "--cpus=1", "--network=none", ...envArgs, tag],
+    // --init runs a minimal PID-1 init process so orphaned children (mongod
+    // instances StrykerJS's test runner spins up per mutant, in particular)
+    // get reaped instead of accumulating as zombies for the container's life.
+    ["run", "--rm", "--init", "--memory=512m", "--cpus=1", "--network=none", ...envArgs, tag],
     { cwd: process.cwd(), timeoutMs: 15 * 60 * 1000 },
   );
 
