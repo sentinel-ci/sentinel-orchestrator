@@ -1,0 +1,6 @@
+node_modules/
+dist/
+sentinel-runs/
+.env
+.env.local
+*.log

@@ -1,0 +1,116 @@
+import type { IterationRecord, RunHistory, ValidationReport } from "./types.js";
+
+function fmt(n: number): string {
+  return n.toFixed(1);
+}
+
+function renderValidation(v: ValidationReport): string {
+  const lines: string[] = [];
+  lines.push(`**Trust score: ${fmt(v.score.trustScore)} / 100** (threshold: ${v.threshold})`);
+  lines.push("");
+  lines.push("| Signal | Score | Weighted contribution |");
+  lines.push("| --- | --- | --- |");
+  lines.push(
+    `| Unit test pass rate | ${fmt(v.score.unitTestPassRate)} (${v.testResult.passed}/${v.testResult.total}) | ${fmt(v.score.weightedContributions.unitTests)} |`,
+  );
+  lines.push(
+    `| Mutation score | ${v.mutationResult.skipped ? "skipped" : fmt(v.score.mutationScore)} (${v.mutationResult.killed}/${v.mutationResult.totalMutants} killed) | ${fmt(v.score.weightedContributions.mutation)} |`,
+  );
+  lines.push(
+    `| Static analysis cleanliness | ${fmt(v.score.staticAnalysisCleanliness)} (${v.staticAnalysisResult.errors} errors, ${v.staticAnalysisResult.warnings} warnings) | ${fmt(v.score.weightedContributions.staticAnalysis)} |`,
+  );
+  lines.push("");
+
+  if (v.testResult.failures.length > 0) {
+    lines.push("<details><summary>Failing tests</summary>");
+    lines.push("");
+    for (const f of v.testResult.failures.slice(0, 20)) {
+      lines.push(`- \`${f.name}\`: ${f.message.split("\n")[0]}`);
+    }
+    lines.push("</details>");
+    lines.push("");
+  }
+
+  if (v.mutationResult.survivedMutants.length > 0) {
+    lines.push(
+      `<details><summary>Survived mutants (${v.mutationResult.survivedMutants.length}) — evidence of weak/tautological tests</summary>`,
+    );
+    lines.push("");
+    for (const m of v.mutationResult.survivedMutants.slice(0, 30)) {
+      lines.push(`- \`${m.file}:${m.line}\` (${m.mutatorName}) — ${m.description}`);
+    }
+    lines.push("</details>");
+    lines.push("");
+  }
+
+  if (v.mutationResult.skipped && v.mutationResult.skipReason) {
+    lines.push(`> Mutation testing skipped: ${v.mutationResult.skipReason}`);
+    lines.push("");
+  }
+
+  if (v.staticAnalysisResult.issues.length > 0) {
+    lines.push("<details><summary>Lint issues</summary>");
+    lines.push("");
+    for (const issue of v.staticAnalysisResult.issues.slice(0, 30)) {
+      lines.push(`- \`${issue.file}:${issue.line}\` [${issue.severity}] ${issue.ruleId ?? ""} ${issue.message}`);
+    }
+    lines.push("</details>");
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+function renderIteration(record: IterationRecord): string {
+  const lines: string[] = [`### Iteration ${record.iteration}`, ""];
+  lines.push(renderValidation(record.validation));
+
+  if (record.repair) {
+    lines.push(`**Repair attempt** (model: \`${record.repair.model}\`)`);
+    lines.push("");
+    if (record.repair.error) {
+      lines.push(`Repair failed: ${record.repair.error}`);
+    } else {
+      lines.push(`Files changed: ${record.repair.filesChanged.map((f) => `\`${f}\``).join(", ") || "none"}`);
+      lines.push("");
+      lines.push("```diff");
+      lines.push(record.repair.diff.slice(0, 6000));
+      lines.push("```");
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+/** Renders the full iteration history as a PR-comment-ready markdown report. */
+export function renderMarkdownReport(history: RunHistory): string {
+  const latest = history.iterations[history.iterations.length - 1];
+  const header =
+    history.outcome === "passed"
+      ? "## ✅ Sentinel CI — trust threshold cleared"
+      : history.outcome === "blocked"
+        ? "## ❌ Sentinel CI — blocked after exhausting repair budget"
+        : "## ⏳ Sentinel CI — validation in progress";
+
+  const lines: string[] = [header, ""];
+  if (latest) {
+    lines.push(
+      `Final trust score: **${fmt(latest.validation.score.trustScore)} / ${latest.validation.threshold}** after ${history.iterations.length} iteration(s).`,
+    );
+    lines.push("");
+  }
+
+  for (const record of history.iterations) {
+    lines.push(renderIteration(record));
+    lines.push("---");
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+/** JSON artifact — the machine-readable counterpart, stored per-PR for the retry loop and human review. */
+export function renderJsonArtifact(history: RunHistory): string {
+  return JSON.stringify(history, null, 2);
+}

@@ -1,0 +1,58 @@
+# Proposed replacement for sandbox-test/.github/workflows/sentinel.yml.
+# Kept here (not pushed to sandbox-test) until reviewed — see PR description
+# for what changed and why. Copy this over .github/workflows/sentinel.yml in
+# sandbox-test once ANTHROPIC_API_KEY is added as a repo secret.
+name: Sentinel CI
+
+on:
+  pull_request:
+    branches: [staging]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: target-app
+
+      - name: Checkout sentinel-orchestrator
+        uses: actions/checkout@v4
+        with:
+          repository: sentinel-ci/sentinel-orchestrator
+          path: sentinel-orchestrator
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build orchestrator
+        working-directory: sentinel-orchestrator
+        run: |
+          npm ci
+          npm run build
+
+      - name: Run Sentinel CI validation + repair loop
+        working-directory: sentinel-orchestrator
+        env:
+          SENTINEL_CHECKOUT_DIR: ${{ github.workspace }}/target-app
+          SENTINEL_ORCHESTRATOR_DIR: ${{ github.workspace }}/sentinel-orchestrator
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node dist/orchestrate.js
+
+      - name: Upload run history
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinel-runs-${{ github.event.pull_request.number }}
+          path: sentinel-orchestrator/sentinel-runs/
+          if-no-files-found: ignore

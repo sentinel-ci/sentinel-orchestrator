@@ -1,0 +1,31 @@
+{
+  "name": "sentinel-orchestrator",
+  "version": "0.1.0",
+  "description": "Mutation-tested trust score + bounded LLM repair loop for Sentinel CI",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "sentinel-validate": "dist/validate.js",
+    "sentinel-orchestrate": "dist/orchestrate.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "validate": "node dist/validate.js",
+    "orchestrate": "node dist/orchestrate.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
+    "diff": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/diff": "^6.0.0",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
